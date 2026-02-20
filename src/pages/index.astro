@@ -52,9 +52,9 @@ import Layout from '../layouts/Layout.astro';
       <!-- Description -->
       <p class="animate-fade-in-up delay-300 mt-4 max-w-2xl text-lg text-slate-500 dark:text-slate-400
                 leading-relaxed">
-        10+ years building scalable systems, leading engineering teams, and shipping
-        products used by millions. I care about clean architecture, great DX, and
-        writing code that lasts.
+        Software engineer with a passion for building user-focused, high-impact software —
+        from intuitive interfaces to scalable backend architecture. I craft elegant,
+        efficient solutions that solve real-world problems.
       </p>
 
       <!-- CTA buttons -->
@@ -89,8 +89,8 @@ import Layout from '../layouts/Layout.astro';
       <div class="animate-fade-in-up delay-500 mt-16 flex flex-wrap gap-8">
         {[
           { value: '10+', label: 'Years experience' },
-          { value: '50+', label: 'Projects shipped' },
-          { value: '3',   label: 'Teams led' },
+          { value: '2',   label: 'SaaS products built' },
+          { value: '5+',  label: 'Cloud platforms used' },
         ].map(({ value, label }) => (
           <div>
             <p class="text-3xl font-bold text-slate-900 dark:text-white">{value}</p>
@@ -116,18 +116,18 @@ import Layout from '../layouts/Layout.astro';
           </h2>
           <div class="space-y-4 text-slate-600 dark:text-slate-300 leading-relaxed">
             <p>
-              I'm a lead software engineer who has spent over a decade designing and building
-              distributed systems, leading cross-functional teams, and turning complex technical
-              problems into elegant solutions.
+              I'm a software engineer with a passion for building user-focused, high-impact
+              software. From intuitive interfaces to scalable backend architecture, I enjoy
+              crafting elegant, efficient solutions that solve real-world problems.
             </p>
             <p>
-              I've worked across startups and enterprises — from zero-to-one product launches
-              to scaling infrastructure serving millions of users. I believe the best code is
-              the code that your team can maintain confidently six months from now.
+              With hands-on experience leading engineering teams and shipping end-to-end
+              products, I thrive in fast-paced environments where clean code, thoughtful
+              design, and collaboration drive innovation.
             </p>
             <p>
-              When I'm not writing code, I'm writing about it — sharing lessons learned from
-              real engineering challenges on my blog.
+              When I'm not writing code, I'm writing about it — sharing lessons learned
+              from real engineering challenges on my blog.
             </p>
           </div>
           <div class="mt-8 flex gap-4">
@@ -151,12 +151,12 @@ import Layout from '../layouts/Layout.astro';
           </p>
           <div class="grid grid-cols-2 gap-3">
             {[
-              { category: 'Languages',     items: ['TypeScript', 'Python', 'Go', 'Rust'] },
-              { category: 'Frontend',      items: ['React', 'Next.js', 'Astro', 'Tailwind'] },
-              { category: 'Backend',       items: ['Node.js', 'FastAPI', 'GraphQL', 'REST'] },
-              { category: 'Infra / Cloud', items: ['AWS', 'Docker', 'Kubernetes', 'Terraform'] },
-              { category: 'Databases',     items: ['PostgreSQL', 'Redis', 'MongoDB', 'DynamoDB'] },
-              { category: 'Practices',     items: ['System Design', 'TDD', 'CI/CD', 'Agile'] },
+              { category: 'Languages',     items: ['TypeScript', 'JavaScript', 'Python'] },
+              { category: 'Frontend',      items: ['React.js', 'Tailwind CSS', 'Astro'] },
+              { category: 'Backend',       items: ['FastAPI', 'REST APIs', 'Async Python'] },
+              { category: 'Infra / Cloud', items: ['AWS', 'GCP', 'Docker', 'Kubernetes'] },
+              { category: 'Databases',     items: ['PostgreSQL', 'MongoDB'] },
+              { category: 'Practices',     items: ['CI/CD', 'System Design', 'Agile'] },
             ].map(({ category, items }) => (
               <div class="p-3 rounded-xl bg-white dark:bg-slate-800
                           border border-slate-200 dark:border-slate-700
@@ -202,24 +202,17 @@ import Layout from '../layouts/Layout.astro';
       <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
         {[
           {
-            title: 'Project Alpha',
-            description: 'Describe what problem this solved, the scale it operates at, and the impact it had.',
-            tags: ['TypeScript', 'React', 'Node.js', 'AWS'],
-            github: '#',
-            live: '#',
+            title: 'Meeting Scheduling SaaS',
+            description: 'Full-stack scheduling platform with real-time availability sync across Google, Outlook, and Apple Calendar. A custom time-slot algorithm cut scheduling load time by 30%. Deployed globally via AWS (S3, CloudFront, Route 53) with APIs on GCP using Docker & Kubernetes.',
+            tags: ['React.js', 'TypeScript', 'FastAPI', 'MongoDB', 'AWS', 'GCP', 'Kubernetes'],
+            github: null,
+            live: null,
           },
           {
-            title: 'Project Beta',
-            description: 'Add a 2-3 sentence description. Mention metrics: "Reduced latency by 60%, serving 2M users."',
-            tags: ['Go', 'PostgreSQL', 'Kubernetes'],
-            github: '#',
-            live: '#',
-          },
-          {
-            title: 'Project Gamma',
-            description: 'Replace these placeholders with your real projects. Link to GitHub and a live demo.',
-            tags: ['Python', 'FastAPI', 'Redis'],
-            github: '#',
+            title: 'ArticleX',
+            description: 'AI-powered SaaS that repurposes content from YouTube, Instagram, and Apple Podcasts into blog articles and summaries. Built for async processing with FastAPI + PostgreSQL, deployed on AWS with full CI/CD pipelines.',
+            tags: ['React.js', 'TypeScript', 'FastAPI', 'PostgreSQL', 'AWS', 'Python', 'AI'],
+            github: null,
             live: null,
           },
         ].map(({ title, description, tags, github, live }) => (
@@ -353,7 +346,7 @@ import Layout from '../layouts/Layout.astro';
         conversation — I'd love to hear from you.
       </p>
       <a
-        href="mailto:hello@sumitkumar.dev"
+        href="mailto:sumitbatwani@gmail.com"
         class="inline-flex items-center gap-2 px-8 py-4 rounded-xl font-semibold text-base
                bg-brand-600 hover:bg-brand-700 text-white
                shadow-xl shadow-brand-500/30 hover:shadow-brand-500/50
