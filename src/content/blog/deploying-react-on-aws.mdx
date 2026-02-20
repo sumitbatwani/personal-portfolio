@@ -1,0 +1,211 @@
+---
+title: "Deploying a React App on AWS: S3 + CloudFront + Route 53 the Right Way"
+description: "A practical guide to deploying a production-grade React application on AWS using S3 for hosting, CloudFront as a CDN, and Route 53 for custom domains — with HTTPS, cache invalidation, and CI/CD included."
+date: 2026-02-21
+tags: ["AWS", "React.js", "DevOps", "CI/CD", "Frontend"]
+draft: false
+---
+
+Deploying a React app to AWS is one of those things that sounds straightforward until you actually do it. There are four services involved, several IAM permissions to get right, and a handful of gotchas that aren't obvious until you've hit them.
+
+This is the setup I've used in production — for the [Meeting Scheduling SaaS](/projects) I worked on — and what I'd reach for again. It gives you global CDN delivery, HTTPS, custom domain, and a CI/CD pipeline that deploys on every push.
+
+## The Stack
+
+| Service | Role |
+|---|---|
+| **S3** | Stores your built React files (HTML, JS, CSS, assets) |
+| **CloudFront** | CDN — serves files from edge locations worldwide, handles HTTPS |
+| **Route 53** | DNS — points your domain to CloudFront |
+| **ACM** | Provisions your free SSL certificate |
+| **GitHub Actions** | Builds and deploys on every push to `main` |
+
+## Step 1: Build Your React App
+
+Make sure your build is production-optimised. With Vite:
+
+```bash
+npm run build
+# outputs to dist/
+```
+
+With Create React App:
+
+```bash
+npm run build
+# outputs to build/
+```
+
+Everything in `dist/` (or `build/`) is what we'll upload to S3.
+
+## Step 2: Create an S3 Bucket
+
+```bash
+aws s3 mb s3://your-app-name --region us-east-1
+```
+
+**Disable "Block all public access"** — CloudFront will need to read these files. Then set a bucket policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublicReadGetObject",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::your-app-name/*"
+    }
+  ]
+}
+```
+
+Enable **Static Website Hosting** in the bucket properties:
+- Index document: `index.html`
+- Error document: `index.html` ← **don't skip this** — it's what makes client-side routing work
+
+## Step 3: Create an ACM Certificate
+
+Go to **AWS Certificate Manager → Request a certificate** in the `us-east-1` region (CloudFront requires this region specifically).
+
+Enter your domain: `yourdomain.com` and `www.yourdomain.com`. Choose DNS validation — ACM will give you a CNAME record to add to Route 53. Once added, it validates in a few minutes.
+
+## Step 4: Create a CloudFront Distribution
+
+In CloudFront, create a new distribution:
+
+| Setting | Value |
+|---|---|
+| **Origin domain** | Your S3 static website endpoint (not the bucket ARN) |
+| **Viewer protocol policy** | Redirect HTTP to HTTPS |
+| **Alternate domain names** | `yourdomain.com`, `www.yourdomain.com` |
+| **Custom SSL certificate** | Select the ACM cert you just created |
+| **Default root object** | `index.html` |
+
+**Critical — custom error pages:**
+
+Add a custom error response for **403** and **404** → redirect to `/index.html` with HTTP 200. This is the other half of making React Router work correctly in production. Without it, a hard refresh on any route other than `/` returns a 403 from S3.
+
+```
+Error code: 403  →  /index.html  →  200
+Error code: 404  →  /index.html  →  200
+```
+
+## Step 5: Point Route 53 to CloudFront
+
+In Route 53, create an **A record** with alias routing:
+
+- Record name: `yourdomain.com`
+- Route traffic to: **Alias to CloudFront distribution**
+- Select your distribution from the dropdown
+
+Repeat for `www` as a CNAME pointing to the CloudFront domain.
+
+DNS propagation takes a few minutes. Once done, your app is live at `https://yourdomain.com`.
+
+## Step 6: Automate with GitHub Actions
+
+Manual deploys don't scale. Here's the GitHub Actions workflow I use:
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+
+      - name: Deploy to S3
+        run: |
+          aws s3 sync dist/ s3://${{ secrets.S3_BUCKET }} \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable"
+          # HTML files should not be cached long-term
+          aws s3 cp dist/index.html s3://${{ secrets.S3_BUCKET }}/index.html \
+            --cache-control "no-cache, no-store, must-revalidate"
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION:    us-east-1
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION:    us-east-1
+```
+
+Add these to GitHub Secrets: `S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `CLOUDFRONT_DISTRIBUTION_ID`.
+
+## The Cache-Control Strategy
+
+This is worth getting right. The workflow above applies two different caching strategies:
+
+- **Hashed assets** (`main.abc123.js`, `style.def456.css`) → `max-age=31536000, immutable` — these filenames change on every build, so we cache them aggressively for a full year
+- **`index.html`** → `no-cache` — this file is always served fresh, so the browser always gets the latest JS/CSS filenames
+
+Without this split, users may get stale `index.html` pointing to JS files that no longer exist in S3 after a deploy.
+
+## IAM Permissions for the Deploy User
+
+Create a dedicated IAM user for CI/CD with a minimal policy — never use root credentials:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:DeleteObject", "s3:ListBucket"],
+      "Resource": [
+        "arn:aws:s3:::your-app-name",
+        "arn:aws:s3:::your-app-name/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "cloudfront:CreateInvalidation",
+      "Resource": "arn:aws:cloudfront::YOUR_ACCOUNT_ID:distribution/YOUR_DIST_ID"
+    }
+  ]
+}
+```
+
+## Common Gotchas
+
+**React Router 404s on hard refresh** — caused by S3 returning a 403 for paths it doesn't recognise as files. Fixed by the custom error pages in CloudFront (Step 4).
+
+**Changes not showing after deploy** — CloudFront is serving stale cache. Run a `/*` invalidation manually or check your workflow is doing it automatically.
+
+**Certificate not available in CloudFront** — ACM certificate must be in `us-east-1`, not your app's region.
+
+**S3 website endpoint vs bucket ARN in CloudFront** — use the website endpoint (`your-bucket.s3-website-us-east-1.amazonaws.com`), not the bucket ARN. The bucket ARN only works with OAC/OAI setups, which adds complexity without much benefit for a public static site.
+
+---
+
+This setup has served us well — global CDN, HTTPS, custom domain, automated deploys, proper cache invalidation. Total cost for a typical frontend app: under $2/month.
