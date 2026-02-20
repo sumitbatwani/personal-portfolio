@@ -1,0 +1,436 @@
+---
+title: "Deploying a FastAPI Backend on AWS EKS: A Production Walkthrough"
+description: "A complete guide to containerising a FastAPI application and deploying it to AWS EKS — covering Docker, ECR, Kubernetes manifests, ALB Ingress, secrets management, health checks, and GitHub Actions CI/CD."
+date: 2026-02-21
+tags: ["FastAPI", "Python", "AWS", "Kubernetes", "DevOps", "Backend"]
+draft: false
+---
+
+Running a FastAPI app locally is easy. Getting it into a production Kubernetes cluster on AWS — with zero-downtime deploys, autoscaling, HTTPS, and a CI/CD pipeline — takes a bit more work. This post covers the full journey, from a bare FastAPI app to a production-grade EKS deployment.
+
+This is the setup behind the Meeting Scheduling SaaS I built — APIs serving real traffic, deployed via Kubernetes on GCP. The patterns here translate directly to AWS EKS.
+
+## What We're Building
+
+```
+GitHub Push
+  → GitHub Actions builds Docker image
+  → Pushes to ECR (Elastic Container Registry)
+  → Applies Kubernetes manifests to EKS
+  → ALB Ingress terminates HTTPS
+  → Pods serve FastAPI traffic
+```
+
+## Prerequisites
+
+- AWS CLI configured (`aws configure`)
+- `kubectl` installed
+- `eksctl` installed — the easiest way to provision EKS clusters
+- Docker installed
+
+## Step 1: Containerise Your FastAPI App
+
+Start with a clean `Dockerfile`. Multi-stage builds keep the image lean:
+
+```dockerfile
+# Stage 1: build dependencies
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+# Install uv for fast dependency resolution
+RUN pip install uv
+
+COPY requirements.txt .
+RUN uv pip install --system -r requirements.txt
+
+# Stage 2: runtime image
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Create non-root user
+RUN addgroup --system app && adduser --system --group app
+
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY . .
+
+USER app
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+```
+
+Add a `.dockerignore`:
+
+```
+__pycache__
+*.pyc
+.env
+.git
+.venv
+tests/
+```
+
+Build and verify locally:
+
+```bash
+docker build -t fastapi-app .
+docker run -p 8000:8000 fastapi-app
+```
+
+## Step 2: Create an EKS Cluster
+
+```bash
+eksctl create cluster \
+  --name fastapi-cluster \
+  --region us-east-1 \
+  --nodegroup-name workers \
+  --node-type t3.medium \
+  --nodes 2 \
+  --nodes-min 1 \
+  --nodes-max 4 \
+  --managed
+```
+
+This takes ~15 minutes. `eksctl` creates the VPC, subnets, IAM roles, and node group automatically and updates your `kubeconfig`.
+
+Verify:
+
+```bash
+kubectl get nodes
+# NAME                          STATUS   ROLES    AGE
+# ip-192-168-1-10.ec2.internal  Ready    <none>   2m
+# ip-192-168-1-11.ec2.internal  Ready    <none>   2m
+```
+
+## Step 3: Push Your Image to ECR
+
+Create a private ECR repository:
+
+```bash
+aws ecr create-repository \
+  --repository-name fastapi-app \
+  --region us-east-1
+```
+
+Authenticate Docker to ECR and push:
+
+```bash
+# Get your account ID
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ECR_REGISTRY="$AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+
+# Login
+aws ecr get-login-password --region us-east-1 \
+  | docker login --username AWS --password-stdin $ECR_REGISTRY
+
+# Tag and push
+docker tag fastapi-app:latest $ECR_REGISTRY/fastapi-app:latest
+docker push $ECR_REGISTRY/fastapi-app:latest
+```
+
+## Step 4: Kubernetes Manifests
+
+Create a `k8s/` directory with three files.
+
+### `k8s/namespace.yaml`
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fastapi
+```
+
+### `k8s/deployment.yaml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-app
+  namespace: fastapi
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fastapi-app
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0        # zero-downtime deploys
+  template:
+    metadata:
+      labels:
+        app: fastapi-app
+    spec:
+      containers:
+        - name: fastapi
+          image: YOUR_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/fastapi-app:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: fastapi-secrets   # see Step 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+```
+
+### `k8s/service.yaml`
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-service
+  namespace: fastapi
+spec:
+  selector:
+    app: fastapi-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+  type: ClusterIP
+```
+
+## Step 5: Secrets Management
+
+Never put secrets in manifests or environment variables baked into the image. Use Kubernetes secrets, populated from AWS Secrets Manager or SSM Parameter Store.
+
+For a simple setup, create the secret from the CLI:
+
+```bash
+kubectl create secret generic fastapi-secrets \
+  --namespace fastapi \
+  --from-literal=DATABASE_URL="postgresql://user:pass@host:5432/db" \
+  --from-literal=SECRET_KEY="your-secret-key" \
+  --from-literal=AWS_REGION="us-east-1"
+```
+
+For production, use **AWS Secrets Manager + External Secrets Operator** to sync secrets automatically — but the above is fine to start.
+
+Add a health check endpoint to your FastAPI app so the probes have something to hit:
+
+```python
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+```
+
+## Step 6: ALB Ingress for HTTPS
+
+Install the AWS Load Balancer Controller:
+
+```bash
+# Create IAM policy
+curl -o iam-policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
+
+aws iam create-policy \
+  --policy-name AWSLoadBalancerControllerIAMPolicy \
+  --policy-document file://iam-policy.json
+
+# Install via Helm
+helm repo add eks https://aws.github.io/eks-charts
+helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=fastapi-cluster \
+  --set serviceAccountName=aws-load-balancer-controller
+```
+
+Create `k8s/ingress.yaml`:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fastapi-ingress
+  namespace: fastapi
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:ACCOUNT:certificate/CERT_ID
+spec:
+  rules:
+    - host: api.yourdomain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fastapi-service
+                port:
+                  number: 80
+```
+
+Apply everything:
+
+```bash
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/service.yaml
+kubectl apply -f k8s/ingress.yaml
+```
+
+## Step 7: CI/CD with GitHub Actions
+
+```yaml
+# .github/workflows/deploy-api.yml
+name: Deploy API to EKS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - 'k8s/**'
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: fastapi-app
+  EKS_CLUSTER: fastapi-cluster
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG:    ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          # Also tag as latest
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                     $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region $AWS_REGION \
+            --name $EKS_CLUSTER
+
+      - name: Deploy to EKS
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG:    ${{ github.sha }}
+        run: |
+          kubectl set image deployment/fastapi-app \
+            fastapi=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            --namespace fastapi
+          kubectl rollout status deployment/fastapi-app \
+            --namespace fastapi \
+            --timeout=120s
+```
+
+The `kubectl rollout status` step blocks until the deploy succeeds or times out — if pods fail to start, the workflow fails and you can roll back:
+
+```bash
+kubectl rollout undo deployment/fastapi-app --namespace fastapi
+```
+
+## Step 8: Horizontal Pod Autoscaler
+
+Once your metrics server is running, add autoscaling:
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fastapi-hpa
+  namespace: fastapi
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fastapi-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+```
+
+```bash
+kubectl apply -f k8s/hpa.yaml
+```
+
+Now your API scales up under load and back down when traffic drops.
+
+## Verifying the Deployment
+
+```bash
+# Check pod status
+kubectl get pods -n fastapi
+
+# View logs
+kubectl logs -f deployment/fastapi-app -n fastapi
+
+# Check ingress and get ALB hostname
+kubectl get ingress -n fastapi
+
+# Test the health endpoint
+curl https://api.yourdomain.com/health
+# {"status":"ok"}
+```
+
+## Things I've Learned the Hard Way
+
+**Use `RollingUpdate` with `maxUnavailable: 0`** — always. The default allows pods to go down during a deploy, which causes dropped requests in production.
+
+**Tag images with the git SHA, not just `latest`** — `latest` makes rollbacks hard. `IMAGE_TAG=${{ github.sha }}` means every deploy is traceable to a commit.
+
+**Set resource requests AND limits** — without requests, Kubernetes can't schedule pods reliably. Without limits, a runaway process can take down the node.
+
+**The readiness probe saves you** — Kubernetes only routes traffic to pods that pass the readiness check. Without it, you'll route requests to pods that are still starting up.
+
+---
+
+The total cost for this setup on EKS with two `t3.medium` nodes runs around $70–80/month. Not free — but it's production-grade infrastructure with autoscaling, HTTPS, zero-downtime deploys, and full observability.
