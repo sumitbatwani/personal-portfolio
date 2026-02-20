@@ -1,0 +1,197 @@
+---
+import { getCollection, render } from 'astro:content';
+import Layout from '../../layouts/Layout.astro';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog', ({ data }) => !data.draft);
+  return posts.map(post => ({
+    params: { slug: post.id.replace(/\.(md|mdx)$/, '') },
+    props:  { post },
+  }));
+}
+
+const { post } = Astro.props;
+const { Content, headings } = await render(post);
+
+const slug = post.id.replace(/\.(md|mdx)$/, '');
+
+function readingTime(body: string): number {
+  return Math.max(1, Math.ceil(body.trim().split(/\s+/).length / 200));
+}
+
+function formatDate(date: Date): string {
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+const rt = readingTime(post.body ?? '');
+
+// Filter top-level headings (h2) for Table of Contents
+const tocHeadings = headings.filter(h => h.depth === 2);
+---
+
+<Layout
+  title={`${post.data.title} — Sumit Kumar`}
+  description={post.data.description}
+>
+  <!-- Header -->
+  <header class="py-16 border-b border-slate-200 dark:border-slate-800">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6">
+      <!-- Back link -->
+      <a
+        href="/blog"
+        class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 dark:text-slate-400
+               hover:text-brand-600 dark:hover:text-brand-400 transition-colors mb-8"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none"
+             viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+        </svg>
+        All posts
+      </a>
+
+      <!-- Tags -->
+      <div class="flex flex-wrap gap-2 mb-4">
+        {post.data.tags.map(tag => (
+          <span class="text-xs font-semibold px-2.5 py-1 rounded-full
+                       bg-brand-50 dark:bg-brand-900/30
+                       text-brand-700 dark:text-brand-300
+                       border border-brand-100 dark:border-brand-800">
+            {tag}
+          </span>
+        ))}
+      </div>
+
+      <!-- Title -->
+      <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white
+                 leading-tight tracking-tight mb-6">
+        {post.data.title}
+      </h1>
+
+      <!-- Meta -->
+      <div class="flex flex-wrap items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
+        <div class="flex items-center gap-2">
+          <div class="w-7 h-7 rounded-full bg-brand-500 flex items-center justify-center
+                      text-white text-xs font-bold shrink-0">
+            SK
+          </div>
+          <span class="font-medium text-slate-700 dark:text-slate-300">Sumit Kumar</span>
+        </div>
+        <span>·</span>
+        <time datetime={post.data.date.toISOString()}>
+          {formatDate(post.data.date)}
+        </time>
+        <span>·</span>
+        <span>{rt} min read</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Body -->
+  <div class="py-12">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6">
+
+      <!-- Table of Contents (shown if 3+ h2 headings) -->
+      {tocHeadings.length >= 3 && (
+        <nav class="mb-10 p-5 rounded-2xl bg-slate-50 dark:bg-slate-900/50
+                    border border-slate-200 dark:border-slate-800">
+          <p class="text-xs font-semibold text-slate-400 dark:text-slate-500
+                    uppercase tracking-widest mb-3">
+            Table of Contents
+          </p>
+          <ol class="space-y-1.5">
+            {tocHeadings.map(h => (
+              <li>
+                <a
+                  href={`#${h.slug}`}
+                  class="text-sm text-slate-600 dark:text-slate-400
+                         hover:text-brand-600 dark:hover:text-brand-400
+                         transition-colors"
+                >
+                  {h.text}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      )}
+
+      <!-- Article content -->
+      <article class="prose prose-slate dark:prose-invert max-w-none
+                      prose-headings:font-bold prose-headings:tracking-tight
+                      prose-a:text-brand-600 dark:prose-a:text-brand-400
+                      prose-a:no-underline hover:prose-a:underline
+                      prose-code:font-mono
+                      prose-pre:rounded-xl prose-pre:border
+                      prose-pre:border-slate-200 dark:prose-pre:border-slate-700
+                      prose-img:rounded-xl prose-img:border
+                      prose-img:border-slate-200 dark:prose-img:border-slate-800
+                      prose-blockquote:border-brand-400
+                      prose-blockquote:not-italic">
+        <Content />
+      </article>
+
+      <!-- Footer -->
+      <div class="mt-16 pt-8 border-t border-slate-200 dark:border-slate-800">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center
+                    justify-between gap-6">
+
+          <!-- Author -->
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full bg-brand-500 flex items-center justify-center
+                        text-white text-sm font-bold shrink-0">
+              SK
+            </div>
+            <div>
+              <p class="font-semibold text-slate-900 dark:text-white text-sm">Sumit Kumar</p>
+              <p class="text-xs text-slate-400 dark:text-slate-500">Lead Software Engineer</p>
+            </div>
+          </div>
+
+          <!-- Share links -->
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-slate-400 font-medium">Share:</span>
+            <a
+              href={`https://x.com/intent/tweet?text=${encodeURIComponent(post.data.title)}&url=${encodeURIComponent(`https://personal-portfolio-pink-alpha-31.vercel.app/blog/${slug}`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-xs font-semibold px-3 py-1.5 rounded-lg
+                     bg-slate-100 dark:bg-slate-800
+                     text-slate-600 dark:text-slate-400
+                     hover:bg-brand-50 dark:hover:bg-brand-900/30
+                     hover:text-brand-600 dark:hover:text-brand-400
+                     transition-colors"
+            >
+              X / Twitter
+            </a>
+            <a
+              href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(`https://personal-portfolio-pink-alpha-31.vercel.app/blog/${slug}`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-xs font-semibold px-3 py-1.5 rounded-lg
+                     bg-slate-100 dark:bg-slate-800
+                     text-slate-600 dark:text-slate-400
+                     hover:bg-brand-50 dark:hover:bg-brand-900/30
+                     hover:text-brand-600 dark:hover:text-brand-400
+                     transition-colors"
+            >
+              LinkedIn
+            </a>
+          </div>
+        </div>
+
+        <!-- Back link -->
+        <a
+          href="/blog"
+          class="mt-8 inline-flex items-center gap-2 text-sm font-semibold
+                 text-brand-600 dark:text-brand-400 hover:underline underline-offset-4 transition-colors"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none"
+               viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+          </svg>
+          Back to all posts
+        </a>
+      </div>
+    </div>
+  </div>
+</Layout>

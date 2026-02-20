@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 /* Dark mode via .dark class on <html> */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -76,3 +77,50 @@
 .delay-300 { animation-delay: 300ms; }
 .delay-400 { animation-delay: 400ms; }
 .delay-500 { animation-delay: 500ms; }
+
+/* Blog prose overrides */
+.prose {
+  --tw-prose-body:          theme(colors.slate.700);
+  --tw-prose-headings:      theme(colors.slate.900);
+  --tw-prose-lead:          theme(colors.slate.600);
+  --tw-prose-links:         theme(colors.brand-600);
+  --tw-prose-bold:          theme(colors.slate.900);
+  --tw-prose-counters:      theme(colors.slate.500);
+  --tw-prose-bullets:       theme(colors.brand-400);
+  --tw-prose-hr:            theme(colors.slate.200);
+  --tw-prose-quotes:        theme(colors.slate.900);
+  --tw-prose-quote-borders: theme(colors.brand-400);
+  --tw-prose-captions:      theme(colors.slate.500);
+  --tw-prose-code:          theme(colors.brand-700);
+  --tw-prose-pre-bg:        theme(colors.slate.900);
+  --tw-prose-th-borders:    theme(colors.slate.300);
+  --tw-prose-td-borders:    theme(colors.slate.200);
+
+  --tw-prose-invert-body:          theme(colors.slate.300);
+  --tw-prose-invert-headings:      theme(colors.white);
+  --tw-prose-invert-lead:          theme(colors.slate.400);
+  --tw-prose-invert-links:         theme(colors.brand-400);
+  --tw-prose-invert-bold:          theme(colors.white);
+  --tw-prose-invert-counters:      theme(colors.slate.400);
+  --tw-prose-invert-bullets:       theme(colors.brand-500);
+  --tw-prose-invert-hr:            theme(colors.slate.700);
+  --tw-prose-invert-quotes:        theme(colors.slate.100);
+  --tw-prose-invert-quote-borders: theme(colors.brand-500);
+  --tw-prose-invert-captions:      theme(colors.slate.400);
+  --tw-prose-invert-code:          theme(colors.brand-300);
+  --tw-prose-invert-pre-bg:        rgb(0 0 0 / 50%);
+  --tw-prose-invert-th-borders:    theme(colors.slate.600);
+  --tw-prose-invert-td-borders:    theme(colors.slate.700);
+}
+
+/* Inline code (not inside pre) */
+.prose :where(code):not(:where(pre code)) {
+  @apply px-1.5 py-0.5 rounded text-xs font-mono
+         bg-brand-50 text-brand-700
+         dark:bg-brand-900/30 dark:text-brand-300;
+  font-weight: 500;
+}
+.prose :where(code):not(:where(pre code))::before,
+.prose :where(code):not(:where(pre code))::after {
+  content: '' !important;
+}
